@@ -1,54 +1,13 @@
-import { patchElementEffect, renderIframeReplaceApp } from "./iframe";
-import { renderElementToContainer } from "./shadow";
-import { pushUrlToWindow } from "./sync";
-import { documentProxyProperties, rawDocumentQuerySelector } from "./common";
-import { WUJIE_TIPS_RELOAD_DISABLED } from "./constant";
-import {
-  getTargetValue,
-  anchorElementGenerator,
-  getDegradeIframe,
-  isCallable,
-  checkProxyFunction,
-  warn,
-  stopMainAppRun,
-} from "./utils";
+import { stopMainAppRun, getTargetValue } from "./utils";
+import { patchElementEffect } from "./iframe";
+import { documentProxyProperties } from "./common";
 
 /**
- * location href 的set劫持操作
+ * window、document、location代理
  */
-function locationHrefSet(iframe: HTMLIFrameElement, value: string, appHostPath: string): boolean {
-  const { shadowRoot, id, degrade, document, degradeAttrs } = iframe.contentWindow.__WUJIE;
-  let url = value;
-  if (!/^http/.test(url)) {
-    let hrefElement = anchorElementGenerator(url);
-    url = appHostPath + hrefElement.pathname + hrefElement.search + hrefElement.hash;
-    hrefElement = null;
-  }
-  iframe.contentWindow.__WUJIE.hrefFlag = true;
-  if (degrade) {
-    const iframeBody = rawDocumentQuerySelector.call(iframe.contentDocument, "body");
-    renderElementToContainer(document.documentElement, iframeBody);
-    renderIframeReplaceApp(window.decodeURIComponent(url), getDegradeIframe(id).parentElement, degradeAttrs);
-  } else renderIframeReplaceApp(url, shadowRoot.host.parentElement, degradeAttrs);
-  pushUrlToWindow(id, url);
-  return true;
-}
-
-/**
- * 非降级情况下window、document、location代理
- */
-export function proxyGenerator(
-  iframe: HTMLIFrameElement,
-  urlElement: HTMLAnchorElement,
-  mainHostPath: string,
-  appHostPath: string
-): {
-  proxyWindow: Window;
-  proxyDocument: Object;
-  proxyLocation: Object;
-} {
+export function proxyGenerator(iframe, urlElement, mainHostPath, appHostPath) {
   const proxyWindow = new Proxy(iframe.contentWindow, {
-    get: (target: Window, p: PropertyKey): any => {
+    get: (target, p) => {
       // location进行劫持
       if (p === "location") {
         return target.__WUJIE.proxyLocation;
@@ -89,7 +48,7 @@ export function proxyGenerator(
           });
         }
         if (propKey === "documentURI" || propKey === "URL") {
-          return (proxyLocation as Location).href;
+          return proxyLocation.href;
         }
 
         // from shadowRoot
@@ -223,117 +182,4 @@ export function proxyGenerator(
     }
   );
   return { proxyWindow, proxyDocument, proxyLocation };
-}
-
-/**
- * 降级情况下document、location代理处理
- */
-export function localGenerator(
-  iframe: HTMLIFrameElement,
-  urlElement: HTMLAnchorElement,
-  mainHostPath: string,
-  appHostPath: string
-): {
-  proxyDocument: Object;
-  proxyLocation: Object;
-} {
-  // 代理 document
-  const proxyDocument = {};
-  const sandbox = iframe.contentWindow.__WUJIE;
-  // 特殊处理
-  Object.defineProperties(proxyDocument, {
-    createElement: {
-      get: () => {
-        return function (...args) {
-          const element = iframe.contentWindow.__WUJIE_RAW_DOCUMENT_CREATE_ELEMENT__.apply(
-            iframe.contentDocument,
-            args
-          );
-          patchElementEffect(element, iframe.contentWindow);
-          return element;
-        };
-      },
-    },
-    createTextNode: {
-      get: () => {
-        return function (...args) {
-          const element = iframe.contentWindow.__WUJIE_RAW_DOCUMENT_CREATE_TEXT_NODE__.apply(
-            iframe.contentDocument,
-            args
-          );
-          patchElementEffect(element, iframe.contentWindow);
-          return element;
-        };
-      },
-    },
-    documentURI: {
-      get: () => (sandbox.proxyLocation as Location).href,
-    },
-    URL: {
-      get: () => (sandbox.proxyLocation as Location).href,
-    },
-    getElementsByTagName: {
-      get() {
-        return function (...args) {
-          const tagName = args[0];
-          if (tagName === "script") {
-            return iframe.contentDocument.scripts as any;
-          }
-          return sandbox.document.getElementsByTagName(tagName) as any;
-        };
-      },
-    },
-  });
-  // 普通处理
-  const {
-    modifyLocalProperties,
-    modifyProperties,
-    ownerProperties,
-    shadowProperties,
-    shadowMethods,
-    documentProperties,
-    documentMethods,
-  } = documentProxyProperties;
-  modifyProperties
-    .filter((key) => !modifyLocalProperties.includes(key))
-    .concat(ownerProperties, shadowProperties, shadowMethods, documentProperties, documentMethods)
-    .forEach((key) => {
-      Object.defineProperty(proxyDocument, key, {
-        get: () => {
-          const value = sandbox.document?.[key];
-          return isCallable(value) ? value.bind(sandbox.document) : value;
-        },
-      });
-    });
-
-  // 代理 location
-  const proxyLocation = {};
-  const location = iframe.contentWindow.location;
-  const locationKeys = Object.keys(location);
-  const constantKey = ["host", "hostname", "port", "protocol", "port"];
-  constantKey.forEach((key) => {
-    proxyLocation[key] = urlElement[key];
-  });
-  Object.defineProperties(proxyLocation, {
-    href: {
-      get: () => location.href.replace(mainHostPath, appHostPath),
-      set: (value) => {
-        locationHrefSet(iframe, value, appHostPath);
-      },
-    },
-    reload: {
-      get() {
-        warn(WUJIE_TIPS_RELOAD_DISABLED);
-        return () => null;
-      },
-    },
-  });
-  locationKeys
-    .filter((key) => !constantKey.concat(["href", "reload"]).includes(key))
-    .forEach((key) => {
-      Object.defineProperty(proxyLocation, key, {
-        get: () => (isCallable(location[key]) ? location[key].bind(location) : location[key]),
-      });
-    });
-  return { proxyDocument, proxyLocation };
 }

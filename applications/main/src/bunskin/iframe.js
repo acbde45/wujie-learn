@@ -1,20 +1,12 @@
-import WuJie from "./sandbox";
-import { ScriptObject } from "./template";
-import { renderElementToContainer } from "./shadow";
-import { syncUrlToWindow } from "./sync";
+import { WUJIE_DATA_FLAG } from "./constant";
 import {
-  fixElementCtrSrcOrHref,
-  isConstructable,
-  anchorElementGenerator,
-  isMatchSyncQueryById,
-  warn,
-  error,
-  execHooks,
-  getCurUrl,
-  getAbsolutePath,
   setAttrsToElement,
-  setTagToScript,
-  getTagFromScript,
+  anchorElementGenerator,
+  warn,
+  isConstructable,
+  fixElementCtrSrcOrHref,
+  isMatchSyncQueryById,
+  getAbsolutePath,
 } from "./utils";
 import {
   documentProxyProperties,
@@ -32,119 +24,53 @@ import {
   rawWindowAddEventListener,
   rawWindowRemoveEventListener,
 } from "./common";
-import { getJsLoader } from "./plugin";
-import { WUJIE_TIPS_SCRIPT_ERROR_REQUESTED, WUJIE_DATA_FLAG } from "./constant";
-import { ScriptObjectLoader } from "./index";
-
-declare global {
-  interface Window {
-    // 是否存在无界
-    __POWERED_BY_WUJIE__?: boolean;
-    // 子应用公共加载路径
-    __WUJIE_PUBLIC_PATH__: string;
-    // 原生的querySelector
-    __WUJIE_RAW_DOCUMENT_QUERY_SELECTOR__: typeof Document.prototype.querySelector;
-
-    // iframe内原生的createElement
-    __WUJIE_RAW_DOCUMENT_CREATE_ELEMENT__: typeof Document.prototype.createElement;
-
-    // iframe内原生的createTextNode
-    __WUJIE_RAW_DOCUMENT_CREATE_TEXT_NODE__: typeof Document.prototype.createTextNode;
-
-    // iframe内原生的head
-    __WUJIE_RAW_DOCUMENT_HEAD__: typeof Document.prototype.head;
-
-    // 原生的querySelector
-    __WUJIE_RAW_DOCUMENT_QUERY_SELECTOR_ALL__: typeof Document.prototype.querySelectorAll;
-    // 原生的window对象
-    __WUJIE_RAW_WINDOW__: Window;
-    // 子应用沙盒实例
-    __WUJIE: WuJie;
-    // 子应用mount函数
-    __WUJIE_MOUNT: () => void;
-    // 子应用unmount函数
-    __WUJIE_UNMOUNT: () => void;
-    // document type
-    Document: typeof Document;
-    // img type
-    HTMLImageElement: typeof HTMLImageElement;
-    // node type
-    Node: typeof Node;
-    // element type
-    Element: typeof Element;
-    // htmlElement typeof
-    HTMLElement: typeof HTMLElement;
-    // anchor type
-    HTMLAnchorElement: typeof HTMLAnchorElement;
-    // source type
-    HTMLSourceElement: typeof HTMLSourceElement;
-    // link type
-    HTMLLinkElement: typeof HTMLLinkElement;
-    // script type
-    HTMLScriptElement: typeof HTMLScriptElement;
-    // media type
-    HTMLMediaElement: typeof HTMLMediaElement;
-    EventTarget: typeof EventTarget;
-    Event: typeof Event;
-    ShadowRoot: typeof ShadowRoot;
-    // 注入对象
-    $wujie: { [key: string]: any };
-  }
-  interface HTMLHeadElement {
-    _cacheListeners: Map<string, EventListenerOrEventListenerObject[]>;
-  }
-  interface HTMLBodyElement {
-    _cacheListeners: Map<string, EventListenerOrEventListenerObject[]>;
-  }
-  interface Document {
-    createTreeWalker(
-      root: Node,
-      whatToShow?: number,
-      filter?: NodeFilter | null,
-      entityReferenceExpansion?: boolean
-    ): TreeWalker;
-  }
-}
+import { syncUrlToIframe, syncUrlToWindow } from "./sync";
 
 /**
- * 修改window对象的事件监听，只有路由事件采用iframe的事件
+ * 防止运行主应用的js代码，给子应用带来很多副作用
  */
-function patchIframeEvents(iframeWindow: Window) {
-  iframeWindow.addEventListener = function addEventListener<K extends keyof WindowEventMap>(
-    type: K,
-    listener: (this: Window, ev: WindowEventMap[K]) => any,
-    options?: boolean | AddEventListenerOptions
-  ) {
-    // 运行插件钩子函数
-    execHooks(iframeWindow.__WUJIE.plugins, "windowAddEventListenerHook", iframeWindow, type, listener, options);
-
-    if (appWindowAddEventListenerEvents.includes(type)) {
-      return rawWindowAddEventListener.call(iframeWindow, type, listener, options);
+// TODO 更加准确抓取停止时机
+function stopIframeLoading(iframeWindow) {
+  const oldDoc = iframeWindow.document;
+  return new Promise((resolve) => {
+    function loop() {
+      setTimeout(() => {
+        let newDoc = null;
+        try {
+          newDoc = iframeWindow.document;
+        } catch (err) {
+          newDoc = null;
+        }
+        // wait for document ready
+        if (!newDoc || newDoc == oldDoc) {
+          loop();
+        } else {
+          iframeWindow.stop ? iframeWindow.stop() : iframeWindow.document.execCommand("Stop");
+          resolve();
+        }
+      }, 1);
     }
-    // 在子应用嵌套场景使用window.window获取真实window
-    rawWindowAddEventListener.call(window.__WUJIE_RAW_WINDOW__ || window, type, listener, options);
-  };
-
-  iframeWindow.removeEventListener = function removeEventListener<K extends keyof WindowEventMap>(
-    type: K,
-    listener: (this: Window, ev: WindowEventMap[K]) => any,
-    options?: boolean | AddEventListenerOptions
-  ) {
-    // 运行插件钩子函数
-    execHooks(iframeWindow.__WUJIE.plugins, "windowRemoveEventListenerHook", iframeWindow, type, listener, options);
-
-    if (appWindowAddEventListenerEvents.includes(type)) {
-      return rawWindowRemoveEventListener.call(iframeWindow, type, listener, options);
-    }
-    rawWindowRemoveEventListener.call(window.__WUJIE_RAW_WINDOW__ || window, type, listener, options);
-  };
+    loop();
+  });
 }
 
-function patchIframeVariable(iframeWindow: Window, wujie: WuJie, appHostPath: string): void {
+function patchIframeVariable(iframeWindow, wujie, appHostPath) {
   iframeWindow.__WUJIE = wujie;
   iframeWindow.__WUJIE_PUBLIC_PATH__ = appHostPath + "/";
   iframeWindow.$wujie = wujie.provide;
   iframeWindow.__WUJIE_RAW_WINDOW__ = iframeWindow;
+}
+
+/**
+ * 初始化base标签
+ */
+export function initBase(iframeWindow, url) {
+  const iframeDocument = iframeWindow.document;
+  const baseElement = iframeDocument.createElement("base");
+  const iframeUrlElement = anchorElementGenerator(iframeWindow.location.href);
+  const appUrlElement = anchorElementGenerator(url);
+  baseElement.setAttribute("href", appUrlElement.protocol + "//" + appUrlElement.host + iframeUrlElement.pathname);
+  iframeDocument.head.appendChild(baseElement);
 }
 
 /**
@@ -155,11 +81,11 @@ function patchIframeVariable(iframeWindow: Window, wujie: WuJie, appHostPath: st
  * @param appHostPath 子应用的 host path
  * @param mainHostPath 主应用的 host path
  */
-function patchIframeHistory(iframeWindow: Window, appHostPath: string, mainHostPath: string): void {
+function patchIframeHistory(iframeWindow, appHostPath, mainHostPath) {
   const history = iframeWindow.history;
   const rawHistoryPushState = history.pushState;
   const rawHistoryReplaceState = history.replaceState;
-  history.pushState = function (data: any, title: string, url?: string): void {
+  history.pushState = function (data, title, url) {
     const baseUrl =
       mainHostPath + iframeWindow.location.pathname + iframeWindow.location.search + iframeWindow.location.hash;
     const mainUrl = getAbsolutePath(url?.replace(appHostPath, ""), baseUrl);
@@ -170,7 +96,7 @@ function patchIframeHistory(iframeWindow: Window, appHostPath: string, mainHostP
     updateBase(iframeWindow, appHostPath, mainHostPath);
     syncUrlToWindow(iframeWindow);
   };
-  history.replaceState = function (data: any, title: string, url?: string): void {
+  history.replaceState = function (data, title, url) {
     const baseUrl =
       mainHostPath + iframeWindow.location.pathname + iframeWindow.location.search + iframeWindow.location.hash;
     const mainUrl = getAbsolutePath(url?.replace(appHostPath, ""), baseUrl);
@@ -184,13 +110,45 @@ function patchIframeHistory(iframeWindow: Window, appHostPath: string, mainHostP
 }
 
 /**
+ * 修改window对象的事件监听，只有路由事件采用iframe的事件
+ */
+function patchIframeEvents(iframeWindow) {
+  iframeWindow.addEventListener = function addEventListener(type, listener, options) {
+    if (appWindowAddEventListenerEvents.includes(type)) {
+      return rawWindowAddEventListener.call(iframeWindow, type, listener, options);
+    }
+    // 在子应用嵌套场景使用window.window获取真实window
+    rawWindowAddEventListener.call(window.__WUJIE_RAW_WINDOW__ || window, type, listener, options);
+  };
+
+  iframeWindow.removeEventListener = function removeEventListener(type, listener, options) {
+
+    if (appWindowAddEventListenerEvents.includes(type)) {
+      return rawWindowRemoveEventListener.call(iframeWindow, type, listener, options);
+    }
+    rawWindowRemoveEventListener.call(window.__WUJIE_RAW_WINDOW__ || window, type, listener, options);
+  };
+}
+
+/**
+ * 子应用前进后退，同步路由到主应用
+ * @param iframeWindow
+ */
+export function syncIframeUrlToWindow(iframeWindow) {
+  iframeWindow.addEventListener("hashchange", () => syncUrlToWindow(iframeWindow));
+  iframeWindow.addEventListener("popstate", () => {
+    syncUrlToWindow(iframeWindow);
+  });
+}
+
+/**
  * 动态的修改iframe的base地址
  * @param iframeWindow
  * @param url
  * @param appHostPath
  * @param mainHostPath
  */
-function updateBase(iframeWindow: Window, appHostPath: string, mainHostPath: string) {
+function updateBase(iframeWindow, appHostPath, mainHostPath) {
   const baseUrl = new URL(iframeWindow.location.href?.replace(mainHostPath, ""), appHostPath);
   const baseElement = rawDocumentQuerySelector.call(iframeWindow.document, "base");
   if (baseElement) baseElement.setAttribute("href", appHostPath + baseUrl.pathname);
@@ -201,9 +159,9 @@ function updateBase(iframeWindow: Window, appHostPath: string, mainHostPath: str
  * @param iframeWindow
  */
 // TODO 继续改进
-function patchWindowEffect(iframeWindow: Window): void {
+function patchWindowEffect(iframeWindow) {
   // 属性处理函数
-  function processWindowProperty(key: string): boolean {
+  function processWindowProperty(key) {
     const value = iframeWindow[key];
     try {
       if (typeof value === "function" && !isConstructable(value)) {
@@ -265,104 +223,6 @@ function patchWindowEffect(iframeWindow: Window): void {
       warn(e.message);
     }
   });
-  // 运行插件钩子函数
-  execHooks(iframeWindow.__WUJIE.plugins, "windowPropertyOverride", iframeWindow);
-}
-
-/**
- * 记录节点的监听事件
- */
-function recordEventListeners(iframeWindow: Window) {
-  const sandbox = iframeWindow.__WUJIE;
-  iframeWindow.Node.prototype.addEventListener = function (
-    type: string,
-    handler: EventListenerOrEventListenerObject,
-    options?: boolean | AddEventListenerOptions
-  ): void {
-    // 添加事件缓存
-    const elementListenerList = sandbox.elementEventCacheMap.get(this);
-    if (elementListenerList) {
-      if (!elementListenerList.find((listener) => listener.handler === handler)) {
-        elementListenerList.push({ type, handler, options });
-      }
-    } else sandbox.elementEventCacheMap.set(this, [{ type, handler, options }]);
-    return rawAddEventListener.call(this, type, handler, options);
-  };
-
-  iframeWindow.Node.prototype.removeEventListener = function (
-    type: string,
-    handler: EventListenerOrEventListenerObject,
-    options?: boolean | EventListenerOptions
-  ): void {
-    // 清除缓存
-    const elementListenerList = sandbox.elementEventCacheMap.get(this);
-    if (elementListenerList) {
-      const index = elementListenerList?.findIndex((ele) => ele.handler === handler);
-      elementListenerList.splice(index, 1);
-    }
-    if (!elementListenerList?.length) {
-      sandbox.elementEventCacheMap.delete(this);
-    }
-    return rawRemoveEventListener.call(this, type, handler, options);
-  };
-}
-
-/**
- * 恢复节点的监听事件
- */
-export function recoverEventListeners(rootElement: Element | ChildNode, iframeWindow: Window) {
-  const sandbox = iframeWindow.__WUJIE;
-  const elementEventCacheMap: WeakMap<
-    Node,
-    Array<{ type: string; handler: EventListenerOrEventListenerObject; options: any }>
-  > = new WeakMap();
-  const ElementIterator = document.createTreeWalker(rootElement, NodeFilter.SHOW_ELEMENT, null, false);
-  let nextElement = ElementIterator.currentNode;
-  while (nextElement) {
-    const elementListenerList = sandbox.elementEventCacheMap.get(nextElement);
-    if (elementListenerList?.length) {
-      elementEventCacheMap.set(nextElement, elementListenerList);
-      elementListenerList.forEach((listener) => {
-        nextElement.addEventListener(listener.type, listener.handler, listener.options);
-      });
-    }
-    nextElement = ElementIterator.nextNode() as HTMLElement;
-  }
-  sandbox.elementEventCacheMap = elementEventCacheMap;
-}
-
-/**
- * 恢复根节点的监听事件
- */
-export function recoverDocumentListeners(
-  oldRootElement: Element | ChildNode,
-  newRootElement: Element | ChildNode,
-  iframeWindow: Window
-) {
-  const sandbox = iframeWindow.__WUJIE;
-  const elementEventCacheMap: WeakMap<
-    Node,
-    Array<{ type: string; handler: EventListenerOrEventListenerObject; options: any }>
-  > = new WeakMap();
-  const elementListenerList = sandbox.elementEventCacheMap.get(oldRootElement);
-  if (elementListenerList?.length) {
-    elementEventCacheMap.set(newRootElement, elementListenerList);
-    elementListenerList.forEach((listener) => {
-      newRootElement.addEventListener(listener.type, listener.handler, listener.options);
-    });
-  }
-  sandbox.elementEventCacheMap = elementEventCacheMap;
-}
-
-/**
- * 修复vue绑定事件e.timeStamp < attachedTimestamp 的情况
- */
-export function patchEventTimeStamp(targetWindow: Window, iframeWindow: Window) {
-  Object.defineProperty(targetWindow.Event.prototype, "timeStamp", {
-    get: () => {
-      return iframeWindow.document.createEvent("Event").timeStamp;
-    },
-  });
 }
 
 /**
@@ -370,7 +230,7 @@ export function patchEventTimeStamp(targetWindow: Window, iframeWindow: Window) 
  * @param iframeWindow
  */
 // TODO 继续改进
-function patchDocumentEffect(iframeWindow: Window): void {
+function patchDocumentEffect(iframeWindow) {
   const sandbox = iframeWindow.__WUJIE;
 
   /**
@@ -379,14 +239,9 @@ function patchDocumentEffect(iframeWindow: Window): void {
    * 但是这样会导致removeEventListener无法正常工作，因为handler => handler.bind(document)
    * 这个地方保存callback = handler.bind(document) 方便removeEventListener
    */
-  const handlerCallbackMap: WeakMap<EventListenerOrEventListenerObject, EventListenerOrEventListenerObject> =
-    new WeakMap();
-  const handlerTypeMap: WeakMap<EventListenerOrEventListenerObject, Array<string>> = new WeakMap();
-  iframeWindow.Document.prototype.addEventListener = function (
-    type: string,
-    handler: EventListenerOrEventListenerObject,
-    options?: boolean | AddEventListenerOptions
-  ): void {
+  const handlerCallbackMap = new WeakMap();
+  const handlerTypeMap = new WeakMap();
+  iframeWindow.Document.prototype.addEventListener = function (type, handler, options) {
     let callback = handlerCallbackMap.get(handler);
     const typeList = handlerTypeMap.get(handler);
     // 设置 handlerCallbackMap
@@ -417,12 +272,8 @@ function patchDocumentEffect(iframeWindow: Window): void {
     }
     sandbox.shadowRoot.addEventListener(type, callback, options);
   };
-  iframeWindow.Document.prototype.removeEventListener = function (
-    type: string,
-    handler: EventListenerOrEventListenerObject,
-    options?: boolean | AddEventListenerOptions
-  ): void {
-    const callback: EventListenerOrEventListenerObject = handlerCallbackMap.get(handler);
+  iframeWindow.Document.prototype.removeEventListener = function (type, handler, options) {
+    const callback = handlerCallbackMap.get(handler);
     const typeList = handlerTypeMap.get(handler);
     if (callback) {
       if (typeList?.includes(type)) {
@@ -538,42 +389,13 @@ function patchDocumentEffect(iframeWindow: Window): void {
       set: undefined,
     });
   });
-  // 运行插件钩子函数
-  execHooks(iframeWindow.__WUJIE.plugins, "documentPropertyOverride", iframeWindow);
-}
-
-/**
- * patch Node effect
- * 1、处理 getRootNode
- * 2、处理 appendChild、insertBefore，当插入的节点为 svg 时，createElement 的 patch 会被去除，需要重新 patch
- * @param iframeWindow
- */
-function patchNodeEffect(iframeWindow: Window): void {
-  const rawGetRootNode = iframeWindow.Node.prototype.getRootNode;
-  const rawAppendChild = iframeWindow.Node.prototype.appendChild;
-  const rawInsertRule = iframeWindow.Node.prototype.insertBefore;
-  iframeWindow.Node.prototype.getRootNode = function (options?: GetRootNodeOptions): Node {
-    const rootNode = rawGetRootNode.call(this, options);
-    if (rootNode === iframeWindow.__WUJIE.shadowRoot) return iframeWindow.document;
-    else return rootNode;
-  };
-  iframeWindow.Node.prototype.appendChild = function <T extends Node>(node: T): T {
-    const res = rawAppendChild.call(this, node);
-    patchElementEffect(node, iframeWindow);
-    return res;
-  };
-  iframeWindow.Node.prototype.insertBefore = function <T extends Node>(node: T, child: Node | null): T {
-    const res = rawInsertRule.call(this, node, child);
-    patchElementEffect(node, iframeWindow);
-    return res;
-  };
 }
 
 /**
  * 修复资源元素的相对路径问题
  * @param iframeWindow
  */
-function patchRelativeUrlEffect(iframeWindow: Window): void {
+function patchRelativeUrlEffect(iframeWindow) {
   fixElementCtrSrcOrHref(iframeWindow, iframeWindow.HTMLImageElement, "src");
   fixElementCtrSrcOrHref(iframeWindow, iframeWindow.HTMLAnchorElement, "href");
   fixElementCtrSrcOrHref(iframeWindow, iframeWindow.HTMLSourceElement, "src");
@@ -583,22 +405,10 @@ function patchRelativeUrlEffect(iframeWindow: Window): void {
 }
 
 /**
- * 初始化base标签
- */
-export function initBase(iframeWindow: Window, url: string): void {
-  const iframeDocument = iframeWindow.document;
-  const baseElement = iframeDocument.createElement("base");
-  const iframeUrlElement = anchorElementGenerator(iframeWindow.location.href);
-  const appUrlElement = anchorElementGenerator(url);
-  baseElement.setAttribute("href", appUrlElement.protocol + "//" + appUrlElement.host + iframeUrlElement.pathname);
-  iframeDocument.head.appendChild(baseElement);
-}
-
-/**
  * 初始化iframe的dom结构
  * @param iframeWindow
  */
-function initIframeDom(iframeWindow: Window, wujie: WuJie, mainHostPath: string, appHostPath: string): void {
+function initIframeDom(iframeWindow, wujie, mainHostPath, appHostPath) {
   const iframeDocument = iframeWindow.document;
   const newDoc = window.document.implementation.createHTMLDocument("");
   const newDocumentElement = iframeDocument.importNode(newDoc.documentElement, true);
@@ -613,7 +423,6 @@ function initIframeDom(iframeWindow: Window, wujie: WuJie, mainHostPath: string,
   initBase(iframeWindow, wujie.url);
   patchIframeHistory(iframeWindow, appHostPath, mainHostPath);
   patchIframeEvents(iframeWindow);
-  if (wujie.degrade) recordEventListeners(iframeWindow);
   syncIframeUrlToWindow(iframeWindow);
 
   patchWindowEffect(iframeWindow);
@@ -622,39 +431,8 @@ function initIframeDom(iframeWindow: Window, wujie: WuJie, mainHostPath: string,
   patchRelativeUrlEffect(iframeWindow);
 }
 
-/**
- * 防止运行主应用的js代码，给子应用带来很多副作用
- */
-// TODO 更加准确抓取停止时机
-function stopIframeLoading(iframeWindow: Window) {
-  const oldDoc = iframeWindow.document;
-  return new Promise<void>((resolve) => {
-    function loop() {
-      setTimeout(() => {
-        let newDoc = null;
-        try {
-          newDoc = iframeWindow.document;
-        } catch (err) {
-          newDoc = null;
-        }
-        // wait for document ready
-        if (!newDoc || newDoc == oldDoc) {
-          loop();
-        } else {
-          iframeWindow.stop ? iframeWindow.stop() : iframeWindow.document.execCommand("Stop");
-          resolve();
-        }
-      }, 1);
-    }
-    loop();
-  });
-}
-
-export function patchElementEffect(
-  element: (HTMLElement | Node | ShadowRoot) & { _hasPatch?: boolean },
-  iframeWindow: Window
-): void {
-  const proxyLocation = iframeWindow.__WUJIE.proxyLocation as Location;
+export function patchElementEffect(element, iframeWindow) {
+  const proxyLocation = iframeWindow.__WUJIE.proxyLocation;
   if (element._hasPatch) return;
   Object.defineProperties(element, {
     baseURI: {
@@ -668,18 +446,33 @@ export function patchElementEffect(
     },
     _hasPatch: { get: () => true },
   });
-  execHooks(iframeWindow.__WUJIE.plugins, "patchElementHook", element, iframeWindow);
 }
 
 /**
- * 子应用前进后退，同步路由到主应用
+ * patch Node effect
+ * 1、处理 getRootNode
+ * 2、处理 appendChild、insertBefore，当插入的节点为 svg 时，createElement 的 patch 会被去除，需要重新 patch
  * @param iframeWindow
  */
-export function syncIframeUrlToWindow(iframeWindow: Window): void {
-  iframeWindow.addEventListener("hashchange", () => syncUrlToWindow(iframeWindow));
-  iframeWindow.addEventListener("popstate", () => {
-    syncUrlToWindow(iframeWindow);
-  });
+function patchNodeEffect(iframeWindow) {
+  const rawGetRootNode = iframeWindow.Node.prototype.getRootNode;
+  const rawAppendChild = iframeWindow.Node.prototype.appendChild;
+  const rawInsertRule = iframeWindow.Node.prototype.insertBefore;
+  iframeWindow.Node.prototype.getRootNode = function (options) {
+    const rootNode = rawGetRootNode.call(this, options);
+    if (rootNode === iframeWindow.__WUJIE.shadowRoot) return iframeWindow.document;
+    else return rootNode;
+  };
+  iframeWindow.Node.prototype.appendChild = function (node) {
+    const res = rawAppendChild.call(this, node);
+    patchElementEffect(node, iframeWindow);
+    return res;
+  };
+  iframeWindow.Node.prototype.insertBefore = function (node, child) {
+    const res = rawInsertRule.call(this, node, child);
+    patchElementEffect(node, iframeWindow);
+    return res;
+  };
 }
 
 /**
@@ -688,18 +481,12 @@ export function syncIframeUrlToWindow(iframeWindow: Window): void {
  * @param iframeWindow
  * @param rawElement 原始的脚本
  */
-export function insertScriptToIframe(
-  scriptResult: ScriptObject | ScriptObjectLoader,
-  iframeWindow: Window,
-  rawElement?: HTMLScriptElement
-) {
-  const { src, module, content, crossorigin, crossoriginType, async, attrs, callback, onload } =
-    scriptResult as ScriptObjectLoader;
+export function insertScriptToIframe(scriptResult, iframeWindow, rawElement) {
+  const { src, module, content, crossorigin, crossoriginType, async, attrs, callback, onload } = scriptResult;
   const scriptElement = iframeWindow.document.createElement("script");
   const nextScriptElement = iframeWindow.document.createElement("script");
   const { replace, plugins, proxyLocation } = iframeWindow.__WUJIE;
-  const jsLoader = getJsLoader({ plugins, replace });
-  let code = jsLoader(content, src, getCurUrl(proxyLocation));
+  let code = content;
   // 添加属性
   attrs &&
     Object.keys(attrs)
@@ -757,26 +544,8 @@ export function insertScriptToIframe(
 
   // 调用回调
   callback?.(iframeWindow);
-  // 执行 hooks
-  execHooks(plugins, "appendOrInsertElementHook", scriptElement, iframeWindow, rawElement);
   // 内联脚本执行后的处理
   !isOutlineScript && afterExecScript();
-}
-
-/**
- * 加载iframe替换子应用
- * @param src 地址
- * @param shadowRoot
- */
-export function renderIframeReplaceApp(
-  src: string,
-  element: HTMLElement,
-  degradeAttrs: { [key: string]: any } = {}
-): void {
-  const iframe = window.document.createElement("iframe");
-  const defaultStyle = "height:100%;width:100%";
-  setAttrsToElement(iframe, { ...degradeAttrs, src, style: [defaultStyle, degradeAttrs.style].join(";") });
-  renderElementToContainer(iframe, element);
 }
 
 /**
@@ -784,15 +553,9 @@ export function renderIframeReplaceApp(
  * 创建和主应用同源的iframe，路径携带了子路由的路由信息
  * iframe必须禁止加载html，防止进入主应用的路由逻辑
  */
-export function iframeGenerator(
-  sandbox: WuJie,
-  attrs: { [key: string]: any },
-  mainHostPath: string,
-  appHostPath: string,
-  appRoutePath: string
-): HTMLIFrameElement {
+export function iframeGenerator(sandbox, mainHostPath, appHostPath, appRoutePath) {
   const iframe = window.document.createElement("iframe");
-  const attrsMerge = { src: mainHostPath, style: "display: none", ...attrs, name: sandbox.id, [WUJIE_DATA_FLAG]: "" };
+  const attrsMerge = { src: mainHostPath, style: "display: none", name: sandbox.id, [WUJIE_DATA_FLAG]: "" };
   setAttrsToElement(iframe, attrsMerge);
   window.document.body.appendChild(iframe);
 

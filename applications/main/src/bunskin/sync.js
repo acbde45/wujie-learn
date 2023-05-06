@@ -1,12 +1,10 @@
-import { anchorElementGenerator, getAnchorElementQueryMap, getSyncUrl, appRouteParse, getDegradeIframe } from "./utils";
-import { renderIframeReplaceApp, patchEventTimeStamp } from "./iframe";
-import { renderElementToContainer, initRenderIframeAndContainer } from "./shadow";
-import { getWujieById, rawDocumentQuerySelector } from "./common";
+import { getSandboxById } from './common';
+import { anchorElementGenerator, getAnchorElementQueryMap, appRouteParse, getSyncUrl } from './utils';
 
 /**
  * 同步子应用路由到主应用路由
  */
-export function syncUrlToWindow(iframeWindow: Window): void {
+export function syncUrlToWindow(iframeWindow) {
   const { sync, id, prefix } = iframeWindow.__WUJIE;
   let winUrlElement = anchorElementGenerator(window.location.href);
   const queryMap = getAnchorElementQueryMap(winUrlElement);
@@ -48,7 +46,7 @@ export function syncUrlToWindow(iframeWindow: Window): void {
 /**
  * 同步主应用路由到子应用
  */
-export function syncUrlToIframe(iframeWindow: Window): void {
+export function syncUrlToIframe(iframeWindow) {
   // 获取当前路由路径
   const { pathname, search, hash } = iframeWindow.location;
   const { id, url, sync, execFlag, prefix, inject } = iframeWindow.__WUJIE;
@@ -69,11 +67,11 @@ export function syncUrlToIframe(iframeWindow: Window): void {
  * 清理非激活态的子应用同步参数
  * 主应用采用hash模式时，切换子应用后已销毁的子应用同步参数还存在需要手动清理
  */
-export function clearInactiveAppUrl(): void {
+export function clearInactiveAppUrl() {
   let winUrlElement = anchorElementGenerator(window.location.href);
   const queryMap = getAnchorElementQueryMap(winUrlElement);
   Object.keys(queryMap).forEach((id) => {
-    const sandbox = getWujieById(id);
+    const sandbox = getSandboxById(id);
     if (!sandbox) return;
     // 子应用执行过并且已经失活才需要清除
     if (sandbox.execFlag && sandbox.sync && !sandbox.hrefFlag && !sandbox.activeFlag) {
@@ -95,7 +93,7 @@ export function clearInactiveAppUrl(): void {
 /**
  * 推送指定url到主应用路由
  */
-export function pushUrlToWindow(id: string, url: string): void {
+export function pushUrlToWindow(id, url) {
   let winUrlElement = anchorElementGenerator(window.location.href);
   const queryMap = getAnchorElementQueryMap(winUrlElement);
   queryMap[id] = window.encodeURIComponent(url);
@@ -112,47 +110,30 @@ export function pushUrlToWindow(id: string, url: string): void {
 /**
  * 应用跳转(window.location.href)情况路由处理
  */
-export function processAppForHrefJump(): void {
+export function processAppForHrefJump() {
   window.addEventListener("popstate", () => {
     let winUrlElement = anchorElementGenerator(window.location.href);
     const queryMap = getAnchorElementQueryMap(winUrlElement);
     winUrlElement = null;
     Object.keys(queryMap)
-      .map((id) => getWujieById(id))
+      .map((id) => getSandboxById(id))
       .filter((sandbox) => sandbox)
       .forEach((sandbox) => {
         const url = queryMap[sandbox.id];
         const iframeBody = rawDocumentQuerySelector.call(sandbox.iframe.contentDocument, "body");
         // 前进href
         if (/http/.test(url)) {
-          if (sandbox.degrade) {
-            renderElementToContainer(sandbox.document.documentElement, iframeBody);
-            renderIframeReplaceApp(
-              window.decodeURIComponent(url),
-              getDegradeIframe(sandbox.id).parentElement,
-              sandbox.degradeAttrs
-            );
-          } else
-            renderIframeReplaceApp(
-              window.decodeURIComponent(url),
-              sandbox.shadowRoot.host.parentElement,
-              sandbox.degradeAttrs
-            );
+          renderIframeReplaceApp(
+            window.decodeURIComponent(url),
+            sandbox.shadowRoot.host.parentElement,
+          );
           sandbox.hrefFlag = true;
           // href后退
         } else if (sandbox.hrefFlag) {
-          if (sandbox.degrade) {
-            // 走全套流程，但是事件恢复不需要
-            const { iframe } = initRenderIframeAndContainer(sandbox.id, sandbox.el, sandbox.degradeAttrs);
-            patchEventTimeStamp(iframe.contentWindow, sandbox.iframe.contentWindow);
-            iframe.contentWindow.onunload = () => {
-              sandbox.unmount();
-            };
-            iframe.contentDocument.appendChild(iframeBody.firstElementChild);
-            sandbox.document = iframe.contentDocument;
-          } else renderElementToContainer(sandbox.shadowRoot.host, sandbox.el);
+          renderElementToContainer(sandbox.shadowRoot.host, sandbox.el);
           sandbox.hrefFlag = false;
         }
       });
   });
 }
+
