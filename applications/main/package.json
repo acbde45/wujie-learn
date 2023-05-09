@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "vite --port 8000",
+    "serve": "vite --port 8000",
     "build": "vue-tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.2.47"
+    "vue": "^3.2.47",
+    "wujie": "workspace:*"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.1.0",

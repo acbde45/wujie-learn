@@ -372,4 +372,3 @@ export function getPatchStyleElements(rootStyleSheets: Array<CSSStyleSheet>): Ar
 
   return [rootStyleSheetElement, fontStyleSheetElement];
 }
-

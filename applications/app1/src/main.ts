@@ -21,7 +21,7 @@ if (window.__POWERED_BY_WUJIE__) {
     // const router = createRouter({ history: createWebHistory(), routes });
     instance = createApp(App)
     // instance.use(router);
-    instance.mount(window.__WUJIE.shadowRoot);
+    instance.mount('#app');
   };
   window.__WUJIE_UNMOUNT = () => {
     instance.unmount();

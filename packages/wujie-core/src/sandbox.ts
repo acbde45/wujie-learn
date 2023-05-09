@@ -236,25 +236,6 @@ export default class Wujie {
     this.provide.shadowRoot = this.shadowRoot;
   }
 
-  renderElementToContainer(
-    element: Element | ChildNode,
-    selectorOrElement: string | HTMLElement
-  ): HTMLElement {
-    const container = getContainer(selectorOrElement);
-    if (container && !container.contains(element)) {
-      // 有 loading 无需清理，已经清理过了
-      if (!container.querySelector(`div[${LOADING_DATA_FLAG}]`)) {
-        // 清除内容
-        clearChild(container);
-      }
-      // 插入元素
-      if (element) {
-        rawElementAppendChild.call(container, element);
-      }
-    }
-    return container;
-  }
-
   /** 启动子应用
    * 1、运行js
    * 2、处理兼容样式
