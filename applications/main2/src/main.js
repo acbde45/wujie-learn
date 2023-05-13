@@ -1,4 +1,4 @@
-import { sandboxCache, Wallworld } from "./sandbox";
+import { wallworldCache, Wallworld } from "./wallword";
 
 /**
  * 定义一个web-component，开启shadow dom，并在connectCallback中装载wallworld，disconnectCallback中卸载wallworld
@@ -22,8 +22,8 @@ function defineWallworldWebComponent() {
       const name = attrs?.name?.value;
       const url = attrs?.url?.value;
       // 判断沙盒有没有创建过，如果创建过，直接激活沙盒
-      if (sandboxCache.has(name)) {
-        sandboxCache.get(name).active();
+      if (wallworldCache.has(name)) {
+        wallworldCache.get(name).active();
         return;
       }
       // 创建沙盒
@@ -32,7 +32,7 @@ function defineWallworldWebComponent() {
       // 激活沙盒
       this.sandbox.active();
       // 缓存沙盒
-      sandboxCache.set(name, this.sandbox);
+      wallworldCache.set(name, this.sandbox);
     }
     disconnectedCallback() {
       // 沙盒失活
