@@ -14,6 +14,20 @@ function defineWallworldWebComponent() {
     constructor() {
       super();
       this.attachShadow({ mode: "open" });
+       // 创建head元素用于插入子应用style标签，创建div让子应用挂载
+       const shadowRoot = this.shadowRoot;
+       const htmlTag = document.createElement("html");
+       const headTag = document.createElement("head");
+       const bodyTag = document.createElement("body");
+       const appTag = document.createElement("div");
+       appTag.setAttribute("id", "app");
+       htmlTag.appendChild(headTag);
+       htmlTag.appendChild(bodyTag);
+       bodyTag.appendChild(appTag);
+       shadowRoot.appendChild(htmlTag);
+       shadowRoot.head = headTag;
+       shadowRoot.body = bodyTag;
+       shadowRoot.app = appTag;
     }
     connectedCallback() {
       // 获取元素attrs
@@ -27,16 +41,16 @@ function defineWallworldWebComponent() {
         return;
       }
       // 创建沙盒
-      this.sandbox = new Wallworld({ name, url });
-      this.sandbox.shadowRoot = this.shadowRoot;
+      this.walloword = new Wallworld({ name, url });
+      this.walloword.shadowRoot = this.shadowRoot;
       // 激活沙盒
-      this.sandbox.active();
+      this.walloword.active();
       // 缓存沙盒
-      wallworldCache.set(name, this.sandbox);
+      wallworldCache.set(name, this.walloword);
     }
     disconnectedCallback() {
       // 沙盒失活
-      this.sandbox.inactive();
+      this.walloword.inactive();
     }
   }
   // 注册wallworld-app

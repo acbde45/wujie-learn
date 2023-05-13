@@ -14,10 +14,11 @@ export class Wallworld {
     this.id = name;
     this.url = url;
     this.mainHostPath = window.location.protocol + "//" + window.location.host;
-    const { appHostPath, appRoutePath } = appRouteParse(url);
+    const { urlElement, appHostPath, appRoutePath } = appRouteParse(url);
+    this.urlElement = urlElement;
     this.appHostPath = appHostPath;
     this.appRoutePath = appRoutePath;
-    this.sandbox = new Sandbox(this, this.mainHostPath, this.appHostPath, this.appRoutePath);
+    this.sandbox = new Sandbox(this, this.mainHostPath, urlElement, appHostPath, appRoutePath);
     importHtml(name, url).then(({ scripts }) => {
       this.sandbox.iframeReady.then(() => {
         // 逐个插入scripts标签到head中
@@ -25,7 +26,7 @@ export class Wallworld {
           const scriptTag = document.createElement("script");
           scriptTag.src = new URL(src, appHostPath).toString();
           scriptTag.setAttribute('type', 'module');
-          this.sandbox.iframe.contentDocument.head.appendChild(scriptTag);
+          this.sandbox.iframe.contentWindow.__WALLWORLD_RAW_DOCUMENT_HEAD__.appendChild(scriptTag);
         });
       });
     });
@@ -41,18 +42,8 @@ export class Wallworld {
     const iframeWindow = this.sandbox.iframe.contentWindow;
     if (iframeWindow.__WALLWORLD_MOUNT) {
       await this.sandbox.iframeReady;
-      const shadowRoot = this.shadowRoot;
-      const htmlTag = document.createElement("html");
-      const headTag = document.createElement("head");
-      const bodyTag = document.createElement("body");
-      const appTag = document.createElement("div");
-      appTag.setAttribute("id", "app");
-      htmlTag.appendChild(headTag);
-      htmlTag.appendChild(bodyTag);
-      bodyTag.appendChild(appTag);
-      shadowRoot.appendChild(htmlTag);
-      this.head = headTag;
-      iframeWindow.__WALLWORLD_MOUNT(appTag);
+      // 子应用挂载
+      iframeWindow.__WALLWORLD_MOUNT(this.shadowRoot.app);
     }
   }
 }
