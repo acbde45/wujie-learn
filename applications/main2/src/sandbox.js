@@ -18,7 +18,14 @@ export class Sandbox {
     }
     window.document.body.appendChild(iframe);
     this.iframe = iframe;
-    this.iframeReady = stopIframeLoading(iframe.contentWindow).then(() => {
+    injectGlobalVarsToWindow(iframe.contentWindow, this.wallworld);
+    // iframe准备完成需要在处理副作用之后
+    let resolve;
+    this.iframeReady = new Promise(r => resolve = r);
+    stopIframeLoading(iframe.contentWindow).then(() => {
+      if (!iframe.contentWindow.__POWERED_BY_WALLWORLD__) {
+        injectGlobalVarsToWindow(iframe.contentWindow, this.wallworld);
+      }
       const iframeDocument = iframe.contentWindow.document;
       const newDoc = window.document.implementation.createHTMLDocument("");
       const newDocumentElement = iframeDocument.importNode(newDoc.documentElement, true);
@@ -28,8 +35,18 @@ export class Sandbox {
       const baseElement = iframeDocument.createElement("base");
       baseElement.setAttribute("href", this.appHostPath + this.appRouteParh);
       iframeDocument.head.appendChild(baseElement);
+      // 处理iframe的副作用，指向shadowRoot
+      resolve();
     });
   }
+}
+
+/**
+ * 往iframe的window对象里注入全局变量
+ */
+function injectGlobalVarsToWindow(iframeWindow, wallworld) {
+  iframeWindow.__POWERED_BY_WALLWORLD__ = true;
+  iframeWindow.__WALLWORLD = wallworld;
 }
 
 /**
