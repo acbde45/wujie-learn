@@ -30,9 +30,11 @@ declare global {
   }
 }
 
+const prefix = window.__POWERED_BY_WALLWORLD__ ? "/app1" : "";
+
 const routes: RouteRecordRaw[] = [
-  { path: "/feature1/list", component: () => import("./pages/feature1/list.vue") },
-  { path: "/feature1/detail", component: () => import("./pages/feature1/detail.vue") },
+  { path: prefix + "/feature1/list", component: () => import("./pages/feature1/list.vue") },
+  { path: prefix + "/feature1/detail", component: () => import("./pages/feature1/detail.vue") },
 ];
 
 if (window.__POWERED_BY_WUJIE__) {

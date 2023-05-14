@@ -1,10 +1,10 @@
 {
-  "name": "main",
+  "name": "main3",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "serve": "vite --port 8000",
+    "serve": "vite --port 3000",
     "build": "vue-tsc && vite build",
     "preview": "vite preview"
   },
@@ -12,8 +12,7 @@
     "naive-ui": "^2.34.3",
     "vfonts": "^0.0.3",
     "vue": "^3.2.47",
-    "vue-router": "^4.1.6",
-    "wujie": "workspace:*"
+    "vue-router": "^4.1.6"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.1.0",
