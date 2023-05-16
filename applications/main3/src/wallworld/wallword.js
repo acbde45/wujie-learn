@@ -1,5 +1,5 @@
 import { Sandbox } from "./sandbox";
-import { appRouteParse } from "./utils";
+import { error, appRouteParse } from "./utils";
 
 /**
  * 缓存创建过的wallworld实例
@@ -33,9 +33,11 @@ export class Wallworld {
   }
 
   active() {
+    console.log('active');
   }
 
   inactive() {
+    console.log('inactive');
   }
 
   async mount() {
@@ -58,13 +60,13 @@ function importHtml(name, url) {
     .then((res) => {
       // 判断状态是否大于400，如果大于400，认为是失败，返回空字符串，并给出警告
       if (res.status >= 400) {
-        console.warn(`获取子应用${name}失败`, res);
+        error(`获取子应用${name}失败`, res);
         return;
       }
       return res.text();
     })
     .catch((err) => {
-      console.warn(`获取子应用${name}失败`, err);
+      error(`获取子应用${name}失败`, err);
     })
     .then((html) => {
       if (!html) {

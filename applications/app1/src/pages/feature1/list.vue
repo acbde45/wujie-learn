@@ -11,18 +11,9 @@
 </template>
 
 <script setup lang="ts">
-import { onActivated, onDeactivated } from "vue";
 import { NButton, NInput, NSpace } from "naive-ui";
 
 const app1DetailRoutePath = window.__POWERED_BY_WALLWORLD__ ? "/app1/feature1/detail" : "/feature1/detail";
-
-onActivated(() => {
-  console.log("activated");
-});
-
-onDeactivated(() => {
-  console.log("deactivated");
-});
 
 function jumpToMainFeature1Detail() {
   const mainRouter = window?.$wujie?.props?.router;
